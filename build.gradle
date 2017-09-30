@@ -1,0 +1,37 @@
+ext {
+
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+}
+
+allprojects {
+    apply plugin: "java"
+    apply plugin: "idea"
+
+    repositories {
+        mavenCentral()
+    }
+
+    sourceCompatibility = "1.8"
+    targetCompatibility = "1.8"
+}
+
+subprojects {
+    group = "io.aaronbatilo.summarybox"
+}
+
+project(":sbtk") {
+    dependencies {
+        testCompile group: 'junit', name: 'junit', version: '4.12'
+    }
+}
+
+project(":summarybox-service") {
+    dependencies {
+        testCompile group: 'junit', name: 'junit', version: '4.12'
+    }
+}
