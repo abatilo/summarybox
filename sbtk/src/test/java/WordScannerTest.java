@@ -1,4 +1,5 @@
 import com.google.common.collect.ImmutableList;
+import lombok.SneakyThrows;
 import org.junit.Test;
 
 import java.util.List;
@@ -7,7 +8,7 @@ import static org.junit.Assert.assertEquals;
 
 public class WordScannerTest {
     @Test
-    public void split() throws Exception {
+    public void split() {
         String s1 = "This is a single sentencesOf. Here, and now, is a second sentencesOf with more words?";
         List<String> expected = ImmutableList.of(
                 "This", "is", "a", "single", "sentencesOf", "Here", "and",
@@ -17,7 +18,8 @@ public class WordScannerTest {
     }
 
     @Test
-    public void sentence() throws Exception {
+    @SneakyThrows
+    public void sentence() {
         String sent = "This is sentence number one. " +
                 "Now we have the second sentence in this paragraph. " +
                 "Here's a thought; what about a third sentence?";

@@ -1,3 +1,4 @@
+import com.google.common.annotations.VisibleForTesting;
 import opennlp.tools.sentdetect.SentenceDetectorME;
 import opennlp.tools.sentdetect.SentenceModel;
 import opennlp.tools.tokenize.SimpleTokenizer;
@@ -28,16 +29,19 @@ public class WordScanner {
         }
     }
 
+    @VisibleForTesting
     static List<String> wordsOf(String s) {
         return Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(s))
                 .filter(s1 -> s1.length() != 1 || Character.isAlphabetic(s1.charAt(0)))
                 .collect(Collectors.toList());
     }
 
+    @VisibleForTesting
     static List<String> sentencesOf(String s) throws IOException {
         return Arrays.stream(detector.sentDetect(s)).collect(Collectors.toList());
     }
 
+    @VisibleForTesting
     static List<Integer> vectorOf(List<String> words) {
         Map<String, Integer> map = new TreeMap<>();
         for (String s : words) {
