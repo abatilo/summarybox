@@ -1,22 +1,41 @@
+import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
-import java.util.Arrays;
+import java.util.List;
 
-import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 
 public class WordScannerTest {
     @Test
     public void split() throws Exception {
-        String s1 = "This is a single sentence. Here, and now, is a second sentence with more words?";
-        System.out.println(Arrays.toString(WordScanner.split(s1)));
-        String[] expected = new String[] {
-                "This", "is", "a", "test"
-        };
-        assertArrayEquals(expected, WordScanner.split(s1));
+        String s1 = "This is a single sentencesOf. Here, and now, is a second sentencesOf with more words?";
+        List<String> expected = ImmutableList.of(
+                "This", "is", "a", "single", "sentencesOf", "Here", "and",
+                "now", "is", "a", "second", "sentencesOf", "with", "more", "words"
+        );
+        assertEquals(expected, WordScanner.wordsOf(s1));
     }
 
     @Test
     public void sentence() throws Exception {
-        System.out.println(Arrays.toString(WordScanner.sentence("Interviewing is too blind. Writing software is so much more than just the act of writing code. If you want to write software professionally, you’re talking about planning, debugging, writing, testing, bug reporting, all sorts of things. But most people will only interview on two things: culture fit, and technical ability in its broadest definition. It’s impossible to be able to measure all of that, let alone in a reasonable amount of time to ask of an interviewee.")));
+        String sent = "This is sentence number one. " +
+                "Now we have the second sentence in this paragraph. " +
+                "Here's a thought; what about a third sentence?";
+        List<String> expected = ImmutableList.of(
+                "This is sentence number one.",
+                "Now we have the second sentence in this paragraph.",
+                "Here's a thought; what about a third sentence?"
+        );
+        assertEquals(expected, WordScanner.sentencesOf(sent));
+    }
+
+    @Test
+    public void vectorMaintainsOrder() {
+        String s = "Here are several words that are in a different order." +
+                "Here are even more words that are in a different sentencesOf";
+        List<Integer> expected = ImmutableList.of(
+                2, 2, 4, 2, 1, 2, 1, 1, 1, 1, 2, 2
+        );
+        assertEquals(expected, WordScanner.vectorOf(WordScanner.wordsOf(s)));
     }
 }
