@@ -1,46 +1,47 @@
 ext {
-    opennlpVersion = "1.8.2"
-    guavaVersion = "23.0"
-    lombokVersion = "1.16.18"
-    dl4jVersion = "0.9.1"
+  opennlpVersion = "1.8.2"
+  guavaVersion = "23.0"
+  lombokVersion = "1.16.18"
+  dl4jVersion = "0.9.1"
 }
 
 buildscript {
-    repositories {
-        mavenCentral()
-    }
+  repositories {
+    mavenCentral()
+  }
 }
 
 allprojects {
-    apply plugin: "java"
-    apply plugin: "idea"
+  apply plugin: "java"
+  apply plugin: "idea"
 
-    repositories {
-        mavenCentral()
-    }
+  repositories {
+    mavenCentral()
+  }
 
-    sourceCompatibility = "1.8"
-    targetCompatibility = "1.8"
+  sourceCompatibility = "1.8"
+  targetCompatibility = "1.8"
 }
 
 subprojects {
-    group = "io.aaronbatilo.summarybox"
+  group = "io.aaronbatilo.summarybox"
 }
 
 project(":sbtk") {
-    dependencies {
-        compile "org.apache.opennlp:opennlp-tools:$opennlpVersion"
-        compile "com.google.guava:guava:$guavaVersion"
-        compile "org.projectlombok:lombok:$lombokVersion"
-        compile "org.deeplearning4j:deeplearning4j-core:$dl4jVersion"
+  dependencies {
+    compile "org.apache.opennlp:opennlp-tools:$opennlpVersion"
+    compile "com.google.guava:guava:$guavaVersion"
+    compile "org.projectlombok:lombok:$lombokVersion"
+    compile "org.deeplearning4j:deeplearning4j-core:$dl4jVersion"
+    compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
+    compile "org.deeplearning4j:deeplearning4j-nlp:$dl4jVersion"
 
-
-        testCompile group: 'junit', name: 'junit', version: '4.12'
-    }
+    testCompile group: 'junit', name: 'junit', version: '4.12'
+  }
 }
 
 project(":summarybox-service") {
-    dependencies {
-        testCompile group: 'junit', name: 'junit', version: '4.12'
-    }
+  dependencies {
+    testCompile group: 'junit', name: 'junit', version: '4.12'
+  }
 }
