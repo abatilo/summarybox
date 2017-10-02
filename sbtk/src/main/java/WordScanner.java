@@ -1,4 +1,7 @@
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MinMaxPriorityQueue;
 import com.google.common.io.Resources;
@@ -14,6 +17,8 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -44,7 +49,10 @@ public class WordScanner {
   // with OpenNLP
   static {
     final InputStream modelStream = WordScanner.class.getResourceAsStream("en-sent.bin");
-    final InputStream posStream = WordScanner.class.getResourceAsStream("en-pos-maxent.bin");
+
+    // Using the perceptron model here will shave off about 4 milliseconds per tag call
+    final InputStream posStream = WordScanner.class.getResourceAsStream("en-pos-perceptron.bin");
+
     try {
       final SentenceModel model = new SentenceModel(modelStream);
       detector = new SentenceDetectorME(model);
@@ -164,6 +172,22 @@ public class WordScanner {
     return vectorOf(wordsOf(words));
   }
 
+  @Data
+  @RequiredArgsConstructor
+  private static final class WordPair {
+    private final String from;
+    private final String to;
+  }
+
+  private static final LoadingCache<WordPair, Double> similarityCache =
+      CacheBuilder.newBuilder()
+          .expireAfterAccess(1, TimeUnit.MINUTES)
+          .build(new CacheLoader<WordPair, Double>() {
+        @Override public Double load(WordPair key) throws Exception {
+          return vec.similarity(key.from, key.to);
+        }
+      });
+
   @VisibleForTesting
   static Set<VectorDistancePair> mostSimilarToN(String word, Set<String> body, int n) {
     MinMaxPriorityQueue<VectorDistancePair> topN = MinMaxPriorityQueue
@@ -172,8 +196,16 @@ public class WordScanner {
 
     body.stream()
         //.filter(s -> !word.equals(s))
-        .filter(s -> !STOP_WORDS.contains(s.toLowerCase()))
-        .map(s -> new VectorDistancePair(s, vec.similarity(word, s)))
+        //.filter(s -> !STOP_WORDS.contains(s.toLowerCase()))
+        //.map(s -> new VectorDistancePair(s, vec.similarity(word, s)))
+        .map(s -> {
+          try {
+            return new VectorDistancePair(s, similarityCache.get(new WordPair(word, s)));
+          } catch (ExecutionException e) {
+            e.printStackTrace();
+          }
+          return new VectorDistancePair(s, Double.NaN);
+        })
         .filter(pair -> !Double.isNaN(pair.distance))
         .forEach(topN::add);
 
@@ -231,6 +263,35 @@ public class WordScanner {
     return bigramNormalized;
   }
 
+  static Map<String, Integer> totalLinkagesOf(String corpus) {
+    List<String> words =
+        wordsOf(corpus).stream().map(String::toLowerCase).collect(Collectors.toList());
+    List<Bigram> bigrams = new ArrayList<>();
+    for (int i = 1; i < words.size(); ++i) {
+      bigrams.add(new Bigram(words.get(i - 1), words.get(i)));
+    }
+
+    Map<String, Map<String, Integer>> bigramFreq = new HashMap<>();
+    for (Bigram bigram : bigrams) {
+      if (bigramFreq.containsKey(bigram.from)) {
+        Map<String, Integer> firstLevel = bigramFreq.get(bigram.from);
+        firstLevel.put(bigram.to, firstLevel.getOrDefault(bigram.to, 0) + 1);
+        bigramFreq.put(bigram.from, firstLevel);
+      } else {
+        Map<String, Integer> firstLevel = new HashMap<>();
+        firstLevel.put(bigram.to, 1);
+        bigramFreq.put(bigram.from, firstLevel);
+      }
+    }
+
+    Map<String, Integer> totals = new HashMap<>();
+    bigramFreq.forEach((fromWord, toCount) -> toCount.values()
+        .stream()
+        .reduce(Integer::sum)
+        .ifPresent(i -> totals.put(fromWord, i)));
+    return totals;
+  }
+
   static Map<String, Integer> wordFrequenciesOf(String corpus) {
     List<String> words =
         wordsOf(corpus).stream().map(String::toLowerCase).collect(Collectors.toList());
@@ -245,7 +306,8 @@ public class WordScanner {
   static Set<String> valuableTokensOf(String corpus) {
     Set<String> nouns = new HashSet<>();
     List<String> allWords = wordsOf(corpus);
-    String[] tags = tagger.tag(allWords.toArray(new String[0]));
+
+    String[] tags = tagger.tag(allWords.toArray(new String[allWords.size()]));
 
     for (int i = 0; i < tags.length; ++i) {
       if (ALLOWED_POS_TAGS.contains(tags[i])) {
