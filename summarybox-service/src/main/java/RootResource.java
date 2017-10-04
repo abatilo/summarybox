@@ -1,16 +1,41 @@
-import org.junit.Test;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.core.Response;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
 
-public class Word2VecTest {
+@Path("/")
+@RequiredArgsConstructor
+public class RootResource {
 
-  @Test
-  public void testCorpus() {
-    System.out.println(WordScanner.INSTANCE.buildGraph(corpus));
-    System.out.println(WordScanner.INSTANCE.buildGraph(cnn));
-    System.out.println(WordScanner.INSTANCE.buildGraph(interview));
-    System.out.println(WordScanner.INSTANCE.buildGraph(languages));
-    System.out.println(WordScanner.INSTANCE.buildGraph(earthquake));
+  private AtomicInteger which = new AtomicInteger(0);
+  private final WordScanner scanner;
+
+  @POST
+  public Response keywords(Text t) {
+    System.out.println(t.getCorpus());
+    return Response.ok().build();
   }
 
+  @GET
+  public Response get() {
+    StringBuilder builder = new StringBuilder();
+    for (String s : scanner.buildGraph(corpi[which.getAndIncrement() % 5])) {
+      builder.append(s);
+      builder.append(",");
+    }
+    return Response
+        .ok(builder.toString())
+        .build();
+  }
+
+
+  @Data
+  private static class Text {
+    private String corpus;
+  }
   private static final String corpus =
       "Code reviews are a valuable part of developing software. A good code review process can help reduce the number of bugs that make it through to production, but more importantly they will help ensure that the code you submit is understandable by more than just you. Unfortunately, there are many times where management will be against code reviews. Usually the argument is that there’s no point in wasting other engineers’ time and if you should be reviewing your code on your own. There’s pockets of validity in the fact that the time could be spent elsewhere, but that doesn’t justify not having them at all. Code reviews will take time, and they should take time. In order to be effective at reviewing code, you should be understanding the changes being submitted in their full context, not just the changes as they stand.\n"
           +
@@ -204,4 +229,9 @@ public class Word2VecTest {
           + "As cities and states try to prepare for the Big One, seismologists and city officials also recommend being prepared at a personal level.\n"
           + "\n"
           + "\"A major disaster, like a 7.2 earthquake, will overwhelm our resources,\" says Sahakian. \"You as a person, your family, and your neighborhood need to be prepared to get no response if you call 911. You need to be able to survive on your own for hours or days.\"";
+
+  private static final String[] corpi = new String[] {
+      corpus, cnn, interview, languages, earthquake
+  };
+
 }

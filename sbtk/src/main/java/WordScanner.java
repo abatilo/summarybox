@@ -4,11 +4,9 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MinMaxPriorityQueue;
-import com.google.common.io.Resources;
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -17,60 +15,33 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import javax.annotation.Nonnull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import opennlp.tools.postag.POSModel;
 import opennlp.tools.postag.POSTagger;
-import opennlp.tools.postag.POSTaggerME;
 import opennlp.tools.sentdetect.SentenceDetectorME;
-import opennlp.tools.sentdetect.SentenceModel;
-import opennlp.tools.tokenize.WhitespaceTokenizer;
-import org.deeplearning4j.models.embeddings.loader.WordVectorSerializer;
+import opennlp.tools.tokenize.SimpleTokenizer;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 
 @Slf4j
+@RequiredArgsConstructor
 public class WordScanner {
-  //    private static final String filePath = Resources.getResource("GoogleNews-vectors-negative300.bin.gz").getPath();
-  //    private static final String filePath = Resources.getResource("text8-50dimens-1iters.bin").getPath();
-  private static final String filePath = Resources.getResource("news.bin").getPath();
-  //    private static final String filePath = Resources.getResource("text8-200dimens-15iters.bin").getPath();
-  //private static final String filePath =
-  //    Resources.getResource("text8-10dimen-1iters.bin").getPath();
-  private static final Word2Vec vec = WordVectorSerializer.readWord2VecModel(filePath);
-  private static SentenceDetectorME detector;
-  private static POSTagger tagger;
 
-  // Statically loads the sentence boundary detector model that comes standard
-  // with OpenNLP
-  static {
-    final InputStream modelStream = WordScanner.class.getResourceAsStream("en-sent.bin");
+  private final SentenceDetectorME detector;
+  private final POSTagger tagger;
+  private final Word2Vec vec;
 
-    // Using the perceptron model here will shave off about 4 milliseconds per tag call
-    final InputStream posStream = WordScanner.class.getResourceAsStream("en-pos-perceptron.bin");
-
-    try {
-      final SentenceModel model = new SentenceModel(modelStream);
-      detector = new SentenceDetectorME(model);
-
-      final POSModel posModel = new POSModel(posStream);
-      tagger = new POSTaggerME(posModel);
-    } catch (IOException e) {
-      log.error("We couldn't open the sentence detector model", e);
-    } finally {
-      if (modelStream != null) {
-        try {
-          modelStream.close();
-        } catch (IOException e) {
-          log.error("We couldn't close the file stream to the sentence detector model", e);
-        }
-      }
-    }
-  }
+  private final Object taggerLock = new Object();
 
   /**
    * Uses OpenNLP's SimpleTokenizer which breaks up words by whitespace and by punctuation. This
@@ -82,7 +53,7 @@ public class WordScanner {
    */
   @VisibleForTesting
   static List<String> wordsOf(String s) {
-    return Arrays.stream(WhitespaceTokenizer.INSTANCE.tokenize(s))
+    return Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(s))
         .map(t -> {
           if (t.endsWith(".") || t.endsWith(",")) return t.substring(0, t.length() - 1);
           return t;
@@ -99,7 +70,7 @@ public class WordScanner {
    * @return A list of Strings, each string being a different sentence
    */
   @VisibleForTesting
-  static List<String> sentencesOf(String s) {
+  public List<String> sentencesOf(String s) {
     return Arrays.stream(detector.sentDetect(s)).collect(Collectors.toList());
   }
 
@@ -113,7 +84,7 @@ public class WordScanner {
    * @return Returns the words in a sorted list
    */
   @VisibleForTesting
-  static List<String> vocabOf(List<String> words) {
+  private List<String> vocabOf(List<String> words) {
     List<String> noStopWords = new ArrayList<>();
     words.stream()
         .filter(s1 -> !STOP_WORDS.contains(s1.toLowerCase()))
@@ -130,11 +101,11 @@ public class WordScanner {
    * @return Returns the words in a sorted list
    */
   @VisibleForTesting
-  static List<String> vocabOf(String words) {
+  private List<String> vocabOf(String words) {
     return vocabOf(wordsOf(words));
   }
 
-  static Set<String> unorderedVocabOf(String corpus) {
+  private Set<String> unorderedVocabOf(String corpus) {
     return new HashSet<>(
         wordsOf(corpus).stream()
             .map(String::toLowerCase)
@@ -152,7 +123,7 @@ public class WordScanner {
    * @return A list of integers, representing the frequencies of the unique words in the list
    */
   @VisibleForTesting
-  static List<Integer> vectorOf(List<String> words) {
+  public List<Integer> vectorOf(List<String> words) {
     Map<String, Integer> map = new TreeMap<>();
     words.stream()
         .filter(s1 -> !STOP_WORDS.contains(s1.toLowerCase()))
@@ -168,7 +139,7 @@ public class WordScanner {
    * @return A list of integers, representing the frequencies of the unique words in the list
    */
   @VisibleForTesting
-  static List<Integer> vectorOf(String words) {
+  private List<Integer> vectorOf(String words) {
     return vectorOf(wordsOf(words));
   }
 
@@ -179,17 +150,18 @@ public class WordScanner {
     private final String to;
   }
 
-  private static final LoadingCache<WordPair, Double> similarityCache =
+  private final LoadingCache<WordPair, Double> similarityCache =
       CacheBuilder.newBuilder()
-          .expireAfterAccess(1, TimeUnit.MINUTES)
+          .maximumSize(1000)
+          .expireAfterAccess(2, TimeUnit.SECONDS)
           .build(new CacheLoader<WordPair, Double>() {
-        @Override public Double load(WordPair key) throws Exception {
-          return vec.similarity(key.from, key.to);
-        }
-      });
+            @Override public Double load(WordPair key) throws Exception {
+              return vec.similarity(key.from, key.to);
+            }
+          });
 
   @VisibleForTesting
-  static Set<VectorDistancePair> mostSimilarToN(String word, Set<String> body, int n) {
+  private Set<VectorDistancePair> mostSimilarToN(String word, Set<String> body, int n) {
     MinMaxPriorityQueue<VectorDistancePair> topN = MinMaxPriorityQueue
         .maximumSize(n)
         .create();
@@ -303,18 +275,92 @@ public class WordScanner {
   }
 
   @VisibleForTesting
-  static Set<String> valuableTokensOf(String corpus) {
+  private Set<String> valuableTokensOf(String corpus) {
     Set<String> nouns = new HashSet<>();
     List<String> allWords = wordsOf(corpus);
 
-    String[] tags = tagger.tag(allWords.toArray(new String[allWords.size()]));
-
+    String[] asArray = new String[allWords.size()];
+    for (int i = 0; i < asArray.length; ++i) {
+      asArray[i] = allWords.get(i);
+    }
+    if (allWords == null) {
+      System.out.println("allWords was null");
+      return ImmutableSet.of();
+    }
+    if (asArray == null) {
+      System.out.println("asArray was null");
+      return ImmutableSet.of();
+    }
+    if (tagger == null) {
+      System.out.println("Tagger was null");
+      return ImmutableSet.of();
+    }
+    String[] tags;
+    synchronized (taggerLock) {
+      tags = tagger.tag(asArray);
+    }
     for (int i = 0; i < tags.length; ++i) {
       if (ALLOWED_POS_TAGS.contains(tags[i])) {
         nouns.add(allWords.get(i).toLowerCase());
       }
     }
     return nouns;
+  }
+
+  @SneakyThrows
+  public Set<String> buildGraph(String corpus) {
+    // build graph
+    ConcurrentMap<String, Set<WordScanner.VectorDistancePair>> adjacencyList =
+        new ConcurrentHashMap<>();
+    Set<String> uniques = valuableTokensOf(corpus);
+
+    ExecutorService service =
+        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
+    for (String unique : uniques) {
+      service.submit(new PopulateSimilarN(adjacencyList, unique, uniques));
+    }
+    service.shutdown();
+    service.awaitTermination(1, TimeUnit.MINUTES);
+
+    // walk the graph
+    Map<String, Integer> scores = new TreeMap<>();
+
+    Map<String, Integer> frequencies = WordScanner.wordFrequenciesOf(corpus);
+    Map<String, Integer> totals = WordScanner.totalLinkagesOf(corpus);
+
+    adjacencyList.forEach((rootWord, setOfPairs) -> {
+      if (totals.containsKey(rootWord)) {
+        scores.put(rootWord,
+            scores.getOrDefault(rootWord, uniques.size()) - totals.get(rootWord));
+      } else {
+        // Normalize the cleaning/munging of all of the words
+      }
+      setOfPairs.forEach(
+          pair -> {
+            scores.put(rootWord,
+                scores.getOrDefault(rootWord, uniques.size()) + frequencies.get(pair.getWord()));
+          });
+    });
+
+    List<Integer> scoresOnly = new ArrayList<>();
+    scores.forEach((word, score) -> scoresOnly.add(score));
+    Collections.sort(scoresOnly);
+    int nintiethPercentile =
+        scores.isEmpty() ? 0 : scoresOnly.get((int) Math.round(scoresOnly.size() * 0.95));
+
+    MinMaxPriorityQueue<ScoredWords> topics = MinMaxPriorityQueue
+        .maximumSize(5)
+        .create();
+    scores.forEach((word, score) -> topics.add(new ScoredWords(word, score)));
+
+    Set<String> finalWords = new HashSet<>();
+    scores.forEach((word, score) -> {
+      if (score >= nintiethPercentile) {
+        finalWords.add(word);
+      }
+    });
+
+    return finalWords;
   }
 
   @Data
@@ -336,11 +382,26 @@ public class WordScanner {
     private final String to;
   }
 
+  @RequiredArgsConstructor
+  private class PopulateSimilarN implements Runnable {
+    private final ConcurrentMap<String, Set<VectorDistancePair>> adjacencyList;
+    private final String rootWord;
+    private final Set<String> wordSet;
+
+    @Override public void run() {
+      adjacencyList.put(rootWord, mostSimilarToN(rootWord, wordSet, 4));
+    }
+  }
+
   @Data
   @RequiredArgsConstructor
-  private static class TaggedWord {
+  private static class ScoredWords implements Comparable<ScoredWords> {
     private final String word;
-    private final String tag;
+    private final Integer score;
+
+    @Override public int compareTo(@Nonnull ScoredWords other) {
+      return -this.score.compareTo(other.score);
+    }
   }
 
   private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(

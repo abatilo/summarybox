@@ -28,7 +28,7 @@ public class WordScannerTest {
         "Now we have the second sentence in this paragraph.",
         "Here's a thought; what about a third sentence?"
     );
-    assertEquals(expected, WordScanner.sentencesOf(sent));
+    assertEquals(expected, WordScanner.INSTANCE.sentencesOf(sent));
   }
 
   @Test
@@ -38,6 +38,6 @@ public class WordScannerTest {
     List<Integer> expected = ImmutableList.of(
         2, 2, 4, 2, 1, 2, 1, 1, 1, 1, 2, 2
     );
-    assertEquals(expected, WordScanner.vectorOf(WordScanner.wordsOf(s)));
+    assertEquals(expected, WordScanner.INSTANCE.vectorOf(WordScanner.wordsOf(s)));
   }
 }
