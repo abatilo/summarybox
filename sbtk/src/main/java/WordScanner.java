@@ -11,7 +11,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -52,11 +51,12 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
 
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
-  static String expandContractions(String inputString) {
+  private static String expandContractions(String inputString) {
     return inputString
         .replace('’', '\'')
         .replace("'s", " is") // We don't care about possessive
         .replace("can't", "cannot")
+        .replace("won't", "will not")
         .replace("n't", " not")
         .replace("'re", " are")
         .replace("'m", " am")
@@ -64,7 +64,8 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .replace("'ve", " have");
   }
 
-  private ConcurrentLinkedQueue<String> normalizedTokensOf(String corpus) throws InterruptedException {
+  private ConcurrentLinkedQueue<String> normalizedTokensOf(String corpus)
+      throws InterruptedException {
     final String expandedCorpus = expandContractions(corpus);
     final String removedPuncutation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
 
@@ -103,12 +104,12 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   private Map<String, Integer> totalLinkagesOf(List<String> words) {
-    final List<WordPair> bigrams = new ArrayList<>();
+    final List<WordPair> bigrams = new ArrayList<>(words.size());
     for (int i = 1; i < words.size(); ++i) {
       bigrams.add(new WordPair(words.get(i - 1), words.get(i)));
     }
 
-    final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>();
+    final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>(bigrams.size());
     for (WordPair bigram : bigrams) {
       if (bigramFreq.containsKey(bigram.from)) {
         Map<String, Integer> firstLevel = bigramFreq.get(bigram.from);
@@ -130,17 +131,16 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   private Map<String, Integer> wordFrequenciesOf(List<String> words) {
-    final Map<String, Integer> frequencies = new HashMap<>();
+    final Map<String, Integer> frequencies = new HashMap<>(words.size());
     words.forEach(w -> frequencies.put(w, frequencies.getOrDefault(w, 0) + 1));
     return frequencies;
   }
 
-  @SneakyThrows Set<String> buildGraph(String corpus) {
-    // build graph
-    final ConcurrentMap<String, Set<WordWithScore>> adjacencyList =
-        new ConcurrentHashMap<>();
+  @SneakyThrows Set<String> textRank(String corpus) {
     final List<String> words = new ArrayList<>(normalizedTokensOf(corpus));
     final Set<String> uniques = new HashSet<>(words);
+    final ConcurrentMap<String, Set<WordWithScore>> adjacencyList =
+        new ConcurrentHashMap<>(uniques.size());
 
     final ExecutorService service =
         Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
@@ -151,7 +151,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     service.awaitTermination(4, TimeUnit.SECONDS);
 
     // walk the graph
-    final Map<String, Integer> scores = new TreeMap<>();
+    final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
     final Map<String, Integer> frequencies = wordFrequenciesOf(words);
     final Map<String, Integer> totals = totalLinkagesOf(words);
 
@@ -227,10 +227,10 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
       final String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
       for (int i = 0; i < tags.length; ++i) {
         final String word = allWords.get(i).toLowerCase();
-        if (ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
-          if (word.endsWith("s")) {
+        if (word.length() > 2 && ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
+          normalized.add(stemmer.stem(word));
+          if (POS_TAGS_TO_STEM.contains(tags[i])) {
             // I'm only worried about removing redundant plurals
-            normalized.add(stemmer.stem(word));
           } else {
             normalized.add(word);
           }
@@ -240,6 +240,10 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
-      "NN", "NNP", "VB"
+      "NN", "NNS", "NNP", "NNPS", "VB", "VBS"
+  );
+
+  private static final Set<String> POS_TAGS_TO_STEM = ImmutableSet.of(
+      "NNS", "NNPS", "VBS"
   );
 }

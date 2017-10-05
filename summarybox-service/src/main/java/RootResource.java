@@ -22,7 +22,7 @@ public class RootResource {
   @GET
   public Response get() {
     StringBuilder builder = new StringBuilder();
-    for (String s : scanner.buildGraph(corpi[which.getAndIncrement() % 5])) {
+    for (String s : scanner.textRank(corpi[which.getAndIncrement() % 5])) {
       builder.append(s);
       builder.append(",");
     }
