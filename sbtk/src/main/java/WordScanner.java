@@ -1,4 +1,3 @@
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
@@ -14,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -25,43 +25,65 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import opennlp.tools.stemmer.PorterStemmer;
 import opennlp.tools.tokenize.SimpleTokenizer;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 
 @Slf4j
 @RequiredArgsConstructor class WordScanner {
 
+  private final ThreadLocalDetector detector;
   private final ThreadLocalTagger tagger;
   private final Word2Vec vec;
+  private final Set<String> STOP_WORDS;
 
-  /**
-   * Uses OpenNLP's SimpleTokenizer which breaks up words by whitespace and by punctuation. This
-   * means that some of the elements returned are just ',' or '.' <p> This function is case
-   * sensitive.
-   *
-   * @param corpus The string whose individual tokens you want to retrieve
-   * @return A list of all of the words in the input, in the same order they came in
-   */
-  @VisibleForTesting
-  private static List<String> wordsOf(String corpus) {
-    return Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(corpus))
-        .filter(s1 -> !STOP_WORDS.contains(s1.toLowerCase()))
-        .filter(s1 -> s1.length() != 1 || Character.isAlphabetic(s1.charAt(0)))
-        .collect(Collectors.toList());
-  }
+  private final PorterStemmer stemmer = new PorterStemmer();
 
   private final LoadingCache<WordPair, Integer> similarityCache =
       CacheBuilder.newBuilder()
           .expireAfterAccess(30, TimeUnit.SECONDS)
           .build(new CacheLoader<WordPair, Integer>() {
             @Override public Integer load(@Nonnull WordPair key) throws Exception {
-              return Math.toIntExact(Math.round(vec.similarity(key.from, key.to)));
+              double sim = vec.similarity(key.from, key.to);
+              // We multiply by 1 000 000 here so that we can keep some decimal information
+              return Math.toIntExact(Math.round(1000000 * sim));
             }
           });
 
-  @VisibleForTesting
+  // Based on:
+  // https://stackoverflow.com/questions/14062030/removing-contractions
+  static String expandContractions(String inputString) {
+    return inputString
+        .replace('’', '\'')
+        .replace("'s", " is") // We don't care about possessive
+        .replace("can't", "cannot")
+        .replace("n't", " not")
+        .replace("'re", " are")
+        .replace("'m", " am")
+        .replace("'ll", " will")
+        .replace("'ve", " have");
+  }
+
+  private ConcurrentLinkedQueue<String> normalizedTokensOf(String corpus) throws InterruptedException {
+    final String expandedCorpus = expandContractions(corpus);
+    final String removedPuncutation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
+
+    final String[] sentences = detector.get().sentDetect(removedPuncutation);
+
+    final ConcurrentLinkedQueue<String> normalized = new ConcurrentLinkedQueue<>();
+
+    final ExecutorService service =
+        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
+    for (String sentence : sentences) {
+      service.submit(new PopulateNormalizedTokens(normalized, sentence));
+    }
+    service.shutdown();
+    service.awaitTermination(200, TimeUnit.MILLISECONDS);
+    return normalized;
+  }
+
   private Set<WordWithScore> mostSimilarTo(String word, Set<String> body) {
-    MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
+    final MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
         .maximumSize(4)
         .create();
 
@@ -80,15 +102,13 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return new HashSet<>(topN);
   }
 
-  private static Map<String, Integer> totalLinkagesOf(String corpus) {
-    List<String> words =
-        wordsOf(corpus).stream().map(String::toLowerCase).collect(Collectors.toList());
-    List<WordPair> bigrams = new ArrayList<>();
+  private Map<String, Integer> totalLinkagesOf(List<String> words) {
+    final List<WordPair> bigrams = new ArrayList<>();
     for (int i = 1; i < words.size(); ++i) {
       bigrams.add(new WordPair(words.get(i - 1), words.get(i)));
     }
 
-    Map<String, Map<String, Integer>> bigramFreq = new HashMap<>();
+    final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>();
     for (WordPair bigram : bigrams) {
       if (bigramFreq.containsKey(bigram.from)) {
         Map<String, Integer> firstLevel = bigramFreq.get(bigram.from);
@@ -101,7 +121,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
       }
     }
 
-    Map<String, Integer> totals = new HashMap<>();
+    final Map<String, Integer> totals = new HashMap<>();
     bigramFreq.forEach((fromWord, toCount) -> toCount.values()
         .stream()
         .reduce(Integer::sum)
@@ -109,47 +129,31 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return totals;
   }
 
-  private static Map<String, Integer> wordFrequenciesOf(String corpus) {
-    List<String> words =
-        wordsOf(corpus).stream().map(String::toLowerCase).collect(Collectors.toList());
-    Map<String, Integer> frequencies = new HashMap<>();
+  private Map<String, Integer> wordFrequenciesOf(List<String> words) {
+    final Map<String, Integer> frequencies = new HashMap<>();
     words.forEach(w -> frequencies.put(w, frequencies.getOrDefault(w, 0) + 1));
     return frequencies;
   }
 
-  @VisibleForTesting
-  private Set<String> valuableTokensOf(String corpus) {
-    Set<String> nouns = new HashSet<>();
-    List<String> allWords = wordsOf(corpus);
-
-    String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
-    for (int i = 0; i < tags.length; ++i) {
-      if (ALLOWED_POS_TAGS.contains(tags[i])) {
-        nouns.add(allWords.get(i).toLowerCase());
-      }
-    }
-    return nouns;
-  }
-
   @SneakyThrows Set<String> buildGraph(String corpus) {
     // build graph
-    ConcurrentMap<String, Set<WordWithScore>> adjacencyList =
+    final ConcurrentMap<String, Set<WordWithScore>> adjacencyList =
         new ConcurrentHashMap<>();
-    Set<String> uniques = valuableTokensOf(corpus);
+    final List<String> words = new ArrayList<>(normalizedTokensOf(corpus));
+    final Set<String> uniques = new HashSet<>(words);
 
-    ExecutorService service =
+    final ExecutorService service =
         Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
     for (String unique : uniques) {
       service.submit(new PopulateSimilarN(adjacencyList, unique, uniques));
     }
     service.shutdown();
-    service.awaitTermination(1, TimeUnit.MINUTES);
+    service.awaitTermination(4, TimeUnit.SECONDS);
 
     // walk the graph
-    Map<String, Integer> scores = new TreeMap<>();
-
-    Map<String, Integer> frequencies = wordFrequenciesOf(corpus);
-    Map<String, Integer> totals = totalLinkagesOf(corpus);
+    final Map<String, Integer> scores = new TreeMap<>();
+    final Map<String, Integer> frequencies = wordFrequenciesOf(words);
+    final Map<String, Integer> totals = totalLinkagesOf(words);
 
     adjacencyList.forEach((rootWord, setOfPairs) -> {
       if (totals.containsKey(rootWord)) {
@@ -161,18 +165,18 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
               scores.getOrDefault(rootWord, uniques.size()) + frequencies.get(pair.getWord())));
     });
 
-    List<Integer> scoresOnly = new ArrayList<>();
+    final List<Integer> scoresOnly = new ArrayList<>();
     scores.forEach((word, score) -> scoresOnly.add(score));
     Collections.sort(scoresOnly);
     int minimumScore =
-        scores.isEmpty() ? 0 : scoresOnly.get((int) Math.round(scoresOnly.size() * 0.95));
+        scores.isEmpty() ? 0 : scoresOnly.get((int) Math.floor(scoresOnly.size() * 0.97));
 
-    MinMaxPriorityQueue<WordWithScore> topics = MinMaxPriorityQueue
+    final MinMaxPriorityQueue<WordWithScore> topics = MinMaxPriorityQueue
         .maximumSize(5)
         .create();
     scores.forEach((word, score) -> topics.add(new WordWithScore(word, score)));
 
-    Set<String> finalWords = new HashSet<>();
+    final Set<String> finalWords = new HashSet<>();
     scores.forEach((word, score) -> {
       if (score >= minimumScore) {
         finalWords.add(word);
@@ -200,7 +204,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     private final String to;
   }
 
-
   @RequiredArgsConstructor
   private class PopulateSimilarN implements Runnable {
     private final ConcurrentMap<String, Set<WordWithScore>> adjacencyList;
@@ -212,22 +215,31 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     }
   }
 
-  private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
-      "NN", "NNP", "VB"//, "VBD", "VBN", "VBP", "VBZ"
-  );
+  @RequiredArgsConstructor
+  private class PopulateNormalizedTokens implements Runnable {
+    private final ConcurrentLinkedQueue<String> normalized;
+    private final String sentence;
 
-  private static final Set<String> STOP_WORDS = ImmutableSet.of(
-      "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
-      "yourself", "yourselves", "he", "him", "his", "himself", "she", "her", "hers", "herself",
-      "it", "its", "itself", "they", "them", "their", "theirs", "themselves", "what", "which",
-      "who", "whom", "this", "that", "these", "those", "am", "is", "are", "was", "were", "be",
-      "been", "being", "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an",
-      "the", "and", "but", "if", "or", "because", "as", "until", "while", "of", "at", "by", "for",
-      "with", "about", "against", "between", "into", "through", "during", "before", "after",
-      "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under",
-      "again", "further", "then", "once", "here", "there", "when", "where", "why", "how", "all",
-      "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not",
-      "only", "own", "same", "so", "than", "too", "very", "s", "t", "can", "will", "just", "don",
-      "should", "now"
+    @Override public void run() {
+      final List<String> allWords =
+          Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(sentence)).collect(Collectors.toList());
+
+      final String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
+      for (int i = 0; i < tags.length; ++i) {
+        final String word = allWords.get(i).toLowerCase();
+        if (ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
+          if (word.endsWith("s")) {
+            // I'm only worried about removing redundant plurals
+            normalized.add(stemmer.stem(word));
+          } else {
+            normalized.add(word);
+          }
+        }
+      }
+    }
+  }
+
+  private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
+      "NN", "NNP", "VB"
   );
 }
