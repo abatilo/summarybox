@@ -25,23 +25,22 @@ public class BaseResourceFactory {
       super(config, env);
     }
 
-    private final InputStream sentenceStream = Resources.getResource("en-sent.bin").openStream();
+    private final InputStream sentenceStream =
+        Resources.getResource(config.getSentenceModel()).openStream();
     private final SentenceModel sentenceModel = new SentenceModel(sentenceStream);
     private final ThreadLocalDetector detector = new ThreadLocalDetector(sentenceModel);
 
-    // TODO(aaron): Put path in config
     private final InputStream posStream =
-        WordScanner.class.getResourceAsStream("en-pos-perceptron.bin");
+        Resources.getResource(config.getPosModel()).openStream();
     private final POSModel posModel = new POSModel(posStream);
     private final ThreadLocalTagger tagger = new ThreadLocalTagger(posModel);
 
-    // TODO(aaron): Put path in config
-    private final String filePath = Resources.getResource("news.bin").getPath();
-    private final Word2Vec vec = WordVectorSerializer.readWord2VecModel(filePath);
+    private final String w2vModel = Resources.getResource(config.getW2vModel()).getPath();
+    private final Word2Vec vec = WordVectorSerializer.readWord2VecModel(w2vModel);
 
     private final Set<String> STOP_WORDS =
         Sets.newHashSet(
-            Files.readLines(new File(Resources.getResource("stopwords.txt").getFile()),
+            Files.readLines(new File(Resources.getResource(config.getStopWords()).getFile()),
                 Charset.defaultCharset()));
 
     private final WordScanner scanner = new WordScanner(detector, tagger, vec, STOP_WORDS);
