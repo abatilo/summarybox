@@ -1,6 +1,3 @@
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
@@ -11,13 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import lombok.Data;
@@ -36,19 +26,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private final Word2Vec vec;
   private final Set<String> STOP_WORDS;
 
-  private final PorterStemmer stemmer = new PorterStemmer();
-
-  private final LoadingCache<WordPair, Integer> similarityCache =
-      CacheBuilder.newBuilder()
-          .expireAfterAccess(30, TimeUnit.SECONDS)
-          .build(new CacheLoader<WordPair, Integer>() {
-            @Override public Integer load(@Nonnull WordPair key) throws Exception {
-              double sim = vec.similarity(key.from, key.to);
-              // We multiply by 1 000 000 here so that we can keep some decimal information
-              return Math.toIntExact(Math.round(1000000 * sim));
-            }
-          });
-
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
   private static String expandContractions(String inputString) {
@@ -64,23 +41,33 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .replace("'ve", " have");
   }
 
-  private ConcurrentLinkedQueue<String> normalizedTokensOf(String corpus)
+  private List<String> normalizedTokensOf(String corpus)
       throws InterruptedException {
     final String expandedCorpus = expandContractions(corpus);
     final String removedPuncutation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
 
     final String[] sentences = detector.get().sentDetect(removedPuncutation);
+    final PorterStemmer stemmer = new PorterStemmer();
 
-    final ConcurrentLinkedQueue<String> normalized = new ConcurrentLinkedQueue<>();
-
-    final ExecutorService service =
-        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
+    final List<String> normalized = new ArrayList<>();
     for (String sentence : sentences) {
-      service.submit(new PopulateNormalizedTokens(normalized, sentence));
+      final List<String> allWords =
+          Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(sentence)).collect(Collectors.toList());
+      final String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
+      for (int i = 0; i < tags.length; ++i) {
+        final String word = allWords.get(i).toLowerCase();
+        if (word.length() > 2 && ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
+          normalized.add(stemmer.stem(word));
+        }
+      }
     }
-    service.shutdown();
-    service.awaitTermination(200, TimeUnit.MILLISECONDS);
     return normalized;
+  }
+
+  private static int calculateSimilarity(Word2Vec vec, String from, String to) {
+    double sim = vec.similarity(from, to);
+    // We multiply by 1 000 000 here so that we can keep some decimal information
+    return Math.toIntExact(Math.round(1000000 * sim));
   }
 
   private Set<WordWithScore> mostSimilarTo(String word, Set<String> body) {
@@ -89,14 +76,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .create();
 
     body.stream()
-        .map(s -> {
-          try {
-            return new WordWithScore(s, similarityCache.get(new WordPair(word, s)));
-          } catch (ExecutionException e) {
-            e.printStackTrace();
-          }
-          return new WordWithScore(s, -1);
-        })
+        .map(s -> new WordWithScore(word, calculateSimilarity(vec, word, s)))
         .filter(pair -> pair.score > 0)
         .forEach(topN::add);
 
@@ -137,18 +117,14 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   @SneakyThrows Set<String> textRank(String corpus) {
-    final List<String> words = new ArrayList<>(normalizedTokensOf(corpus));
+    final List<String> words = normalizedTokensOf(corpus);
     final Set<String> uniques = new HashSet<>(words);
-    final ConcurrentMap<String, Set<WordWithScore>> adjacencyList =
-        new ConcurrentHashMap<>(uniques.size());
+    final Map<String, Set<WordWithScore>> adjacencyList =
+        new HashMap<>(uniques.size());
 
-    final ExecutorService service =
-        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
     for (String unique : uniques) {
-      service.submit(new PopulateSimilarN(adjacencyList, unique, uniques));
+      adjacencyList.put(unique, mostSimilarTo(unique, uniques));
     }
-    service.shutdown();
-    service.awaitTermination(4, TimeUnit.SECONDS);
 
     // walk the graph
     final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
@@ -204,46 +180,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     private final String to;
   }
 
-  @RequiredArgsConstructor
-  private class PopulateSimilarN implements Runnable {
-    private final ConcurrentMap<String, Set<WordWithScore>> adjacencyList;
-    private final String rootWord;
-    private final Set<String> wordSet;
-
-    @Override public void run() {
-      adjacencyList.put(rootWord, mostSimilarTo(rootWord, wordSet));
-    }
-  }
-
-  @RequiredArgsConstructor
-  private class PopulateNormalizedTokens implements Runnable {
-    private final ConcurrentLinkedQueue<String> normalized;
-    private final String sentence;
-
-    @Override public void run() {
-      final List<String> allWords =
-          Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(sentence)).collect(Collectors.toList());
-
-      final String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
-      for (int i = 0; i < tags.length; ++i) {
-        final String word = allWords.get(i).toLowerCase();
-        if (word.length() > 2 && ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
-          normalized.add(stemmer.stem(word));
-          if (POS_TAGS_TO_STEM.contains(tags[i])) {
-            // I'm only worried about removing redundant plurals
-          } else {
-            normalized.add(word);
-          }
-        }
-      }
-    }
-  }
-
   private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
       "NN", "NNS", "NNP", "NNPS", "VB", "VBS"
-  );
-
-  private static final Set<String> POS_TAGS_TO_STEM = ImmutableSet.of(
-      "NNS", "NNPS", "VBS"
   );
 }

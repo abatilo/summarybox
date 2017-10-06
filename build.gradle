@@ -4,6 +4,7 @@ ext {
   lombokVersion = "1.16.18"
   dl4jVersion = "0.9.1"
   dropWizardVersion = "1.1.4"
+  threadlyVersion = "5.2"
 }
 
 buildscript {
@@ -36,6 +37,7 @@ project(":sbtk") {
     compile "org.deeplearning4j:deeplearning4j-core:$dl4jVersion"
     compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
     compile "org.deeplearning4j:deeplearning4j-nlp:$dl4jVersion"
+    compile "org.threadly:threadly:$threadlyVersion"
 
     testCompile group: 'junit', name: 'junit', version: '4.12'
   }

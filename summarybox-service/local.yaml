@@ -1,6 +1,3 @@
-server:
-  maxThreads: 30
-
 sentenceModel: en-sent.bin
 posModel: en-pos-perceptron.bin
 w2vModel: news.bin
