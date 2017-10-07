@@ -1,20 +1,22 @@
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import opennlp.tools.stemmer.PorterStemmer;
 import opennlp.tools.tokenize.SimpleTokenizer;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 
@@ -41,53 +43,71 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .replace("'ve", " have");
   }
 
-  private List<String> normalizedTokensOf(String corpus)
-      throws InterruptedException {
+  private boolean allowedWord(String word, String tag) {
+    if (word.length() <= 2) {
+      return false;
+    }
+
+    if (!ALLOWED_POS_TAGS.contains(tag)) {
+      return false;
+    }
+
+    if (STOP_WORDS.contains(word)) {
+      return false;
+    }
+
+    if (!vec.hasWord(word)) {
+      return false;
+    }
+    return true;
+  }
+
+  private List<String> normalizedTokensOf(String corpus) {
     final String expandedCorpus = expandContractions(corpus);
     final String removedPuncutation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
 
     final String[] sentences = detector.get().sentDetect(removedPuncutation);
-    final PorterStemmer stemmer = new PorterStemmer();
 
     final List<String> normalized = new ArrayList<>();
     for (String sentence : sentences) {
-      final List<String> allWords =
-          Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(sentence)).collect(Collectors.toList());
-      final String[] tags = tagger.get().tag(allWords.toArray(new String[allWords.size()]));
+      final String[] allWords = SimpleTokenizer.INSTANCE.tokenize(sentence);
+      final String[] tags = tagger.get().tag(allWords);
       for (int i = 0; i < tags.length; ++i) {
-        final String word = allWords.get(i).toLowerCase();
-        if (word.length() > 2 && ALLOWED_POS_TAGS.contains(tags[i]) && !STOP_WORDS.contains(word)) {
-          normalized.add(stemmer.stem(word));
+        final String word = allWords[i].toLowerCase();
+        final String tag = tags[i];
+        if (allowedWord(word, tag)) {
+          normalized.add(word);
         }
       }
     }
     return normalized;
   }
 
-  private static int calculateSimilarity(Word2Vec vec, String from, String to) {
-    double sim = vec.similarity(from, to);
-    // We multiply by 1 000 000 here so that we can keep some decimal information
-    return Math.toIntExact(Math.round(1000000 * sim));
-  }
+  private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
+      .expireAfterAccess(2, TimeUnit.MINUTES)
+      .build(new CacheLoader<WordPair, Integer>() {
+        @Override public Integer load(@Nonnull WordPair key) throws Exception {
+          double sim = vec.similarity(key.from, key.to);
+          return Math.toIntExact(Math.round(1000000 * sim));
+        }
+      });
 
-  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body) {
+  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body)
+      throws ExecutionException {
     final MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
-        .maximumSize(4)
+        .maximumSize(3)
         .create();
-
-    body.stream()
-        .map(s -> new WordWithScore(word, calculateSimilarity(vec, word, s)))
-        .filter(pair -> pair.score > 0)
-        .forEach(topN::add);
-
+    for (String s : body) {
+      topN.add(new WordWithScore(word, similarityCache.get(new WordPair(word, s))));
+    }
     return new HashSet<>(topN);
   }
 
-  private Map<String, Integer> totalLinkagesOf(List<String> words) {
+  private Map<String, Integer> totalLinkagesOf(Map<String, Set<WordWithScore>> words) {
     final List<WordPair> bigrams = new ArrayList<>(words.size());
-    for (int i = 1; i < words.size(); ++i) {
-      bigrams.add(new WordPair(words.get(i - 1), words.get(i)));
-    }
+    words.forEach((from, to) -> to.forEach(t -> {
+      bigrams.add(new WordPair(from, t.word));
+    }));
 
     final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>(bigrams.size());
     for (WordPair bigram : bigrams) {
@@ -117,6 +137,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   @SneakyThrows Set<String> textRank(String corpus) {
+    // appx 20 ms
     final List<String> words = normalizedTokensOf(corpus);
     final Set<String> uniques = new HashSet<>(words);
     final Map<String, Set<WordWithScore>> adjacencyList =
@@ -129,13 +150,13 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     // walk the graph
     final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
     final Map<String, Integer> frequencies = wordFrequenciesOf(words);
-    final Map<String, Integer> totals = totalLinkagesOf(words);
+
+    // This is incorrect, we need totalLinkages in the adjacency list, not of bigrams
+    final Map<String, Integer> totals = totalLinkagesOf(adjacencyList);
 
     adjacencyList.forEach((rootWord, setOfPairs) -> {
-      if (totals.containsKey(rootWord)) {
-        scores.put(rootWord,
-            scores.getOrDefault(rootWord, uniques.size()) - totals.get(rootWord));
-      }
+      scores.put(rootWord,
+          scores.getOrDefault(rootWord, uniques.size()) - totals.get(rootWord));
       setOfPairs.forEach(
           pair -> scores.put(rootWord,
               scores.getOrDefault(rootWord, uniques.size()) + frequencies.get(pair.getWord())));
@@ -158,7 +179,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         finalWords.add(word);
       }
     });
-
     return finalWords;
   }
 
@@ -181,6 +201,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
-      "NN", "NNS", "NNP", "NNPS", "VB", "VBS"
+      //"NN", "NNS", "NNP", "NNPS", "VB", "VBS"
+      "NN", "VB"
   );
 }

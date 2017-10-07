@@ -26,8 +26,10 @@ public class RootResource {
       builder.append(s);
       builder.append(",");
     }
+    String result = builder.toString();
+    System.out.println(result);
     return Response
-        .ok(builder.toString())
+        .ok(result)
         .build();
   }
 

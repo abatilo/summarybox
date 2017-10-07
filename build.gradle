@@ -4,12 +4,15 @@ ext {
   lombokVersion = "1.16.18"
   dl4jVersion = "0.9.1"
   dropWizardVersion = "1.1.4"
-  threadlyVersion = "5.2"
 }
 
 buildscript {
   repositories {
     mavenCentral()
+    jcenter()
+  }
+  dependencies {
+    classpath 'com.github.jengelman.gradle.plugins:shadow:2.0.1'
   }
 }
 
@@ -37,13 +40,22 @@ project(":sbtk") {
     compile "org.deeplearning4j:deeplearning4j-core:$dl4jVersion"
     compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
     compile "org.deeplearning4j:deeplearning4j-nlp:$dl4jVersion"
-    compile "org.threadly:threadly:$threadlyVersion"
 
     testCompile group: 'junit', name: 'junit', version: '4.12'
   }
 }
 
 project(":summarybox-service") {
+  apply plugin: 'com.github.johnrengelman.shadow'
+  apply plugin: 'application'
+
+  mainClassName = "SummaryBoxApplication"
+
+  shadowJar {
+    archiveName = "summarybox.jar"
+    destinationDir projectDir
+  }
+
   dependencies {
     compile project(":sbtk")
     compile "io.dropwizard:dropwizard-core:$dropWizardVersion"

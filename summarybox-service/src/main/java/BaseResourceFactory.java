@@ -35,12 +35,12 @@ public class BaseResourceFactory {
     private final POSModel posModel = new POSModel(posStream);
     private final ThreadLocalTagger tagger = new ThreadLocalTagger(posModel);
 
-    private final String w2vModel = Resources.getResource(config.getW2vModel()).getPath();
+    private final String w2vModel = config.getW2vModel();
     private final Word2Vec vec = WordVectorSerializer.readWord2VecModel(w2vModel);
 
     private final Set<String> STOP_WORDS =
         Sets.newHashSet(
-            Files.readLines(new File(Resources.getResource(config.getStopWords()).getFile()),
+            Files.readLines(new File(config.getStopWords()),
                 Charset.defaultCharset()));
 
     private final WordScanner scanner = new WordScanner(detector, tagger, vec, STOP_WORDS);
