@@ -1,15 +1,12 @@
 import io.dropwizard.Configuration;
-import javax.validation.constraints.NotNull;
+import javax.validation.Valid;
 import lombok.Getter;
 
 @Getter
 public class SummaryBoxConfiguration extends Configuration {
-  @NotNull
-  private String sentenceModel;
-  @NotNull
-  private String posModel;
-  @NotNull
-  private String w2vModel;
-  @NotNull
-  private String stopWords;
+  @Valid private String sentenceModel;
+  @Valid private String posModel;
+  @Valid private String w2vModel;
+  @Valid private String stopWords;
+  @Valid private WordScannerConfiguraton wordScanner;
 }

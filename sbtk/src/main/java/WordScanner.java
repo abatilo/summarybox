@@ -1,7 +1,6 @@
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -21,12 +21,25 @@ import opennlp.tools.tokenize.SimpleTokenizer;
 import org.deeplearning4j.models.word2vec.Word2Vec;
 
 @Slf4j
-@RequiredArgsConstructor class WordScanner {
+@AllArgsConstructor class WordScanner {
 
   private final ThreadLocalDetector detector;
   private final ThreadLocalTagger tagger;
   private final Word2Vec vec;
   private final Set<String> STOP_WORDS;
+  private int similar;
+  private double percentile;
+  private int topics;
+  private final Set<String> ALLOWED_POS_TAGS;
+
+  private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
+      .expireAfterAccess(2, TimeUnit.MINUTES)
+      .build(new CacheLoader<WordPair, Integer>() {
+        @Override public Integer load(@Nonnull WordPair key) throws Exception {
+          double sim = vec.similarity(key.from, key.to);
+          return Math.toIntExact(Math.round(1000000 * sim));
+        }
+      });
 
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
@@ -83,24 +96,21 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return normalized;
   }
 
-  private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
-      .expireAfterAccess(2, TimeUnit.MINUTES)
-      .build(new CacheLoader<WordPair, Integer>() {
-        @Override public Integer load(@Nonnull WordPair key) throws Exception {
-          double sim = vec.similarity(key.from, key.to);
-          return Math.toIntExact(Math.round(1000000 * sim));
-        }
-      });
-
   private Set<WordWithScore> mostSimilarTo(String word, Set<String> body)
       throws ExecutionException {
     final MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
-        .maximumSize(3)
+        .maximumSize(similar)
         .create();
     for (String s : body) {
       topN.add(new WordWithScore(word, similarityCache.get(new WordPair(word, s))));
     }
     return new HashSet<>(topN);
+  }
+
+  private Map<String, Integer> wordFrequenciesOf(List<String> words) {
+    final Map<String, Integer> frequencies = new HashMap<>(words.size());
+    words.forEach(w -> frequencies.put(w, frequencies.getOrDefault(w, 0) + 1));
+    return frequencies;
   }
 
   private Map<String, Integer> totalLinkagesOf(Map<String, Set<WordWithScore>> words) {
@@ -130,13 +140,8 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return totals;
   }
 
-  private Map<String, Integer> wordFrequenciesOf(List<String> words) {
-    final Map<String, Integer> frequencies = new HashMap<>(words.size());
-    words.forEach(w -> frequencies.put(w, frequencies.getOrDefault(w, 0) + 1));
-    return frequencies;
-  }
-
-  @SneakyThrows Set<String> textRank(String corpus) {
+  @SneakyThrows
+  Set<String> textRank(String corpus) {
     // appx 20 ms
     final List<String> words = normalizedTokensOf(corpus);
     final Set<String> uniques = new HashSet<>(words);
@@ -150,8 +155,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     // walk the graph
     final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
     final Map<String, Integer> frequencies = wordFrequenciesOf(words);
-
-    // This is incorrect, we need totalLinkages in the adjacency list, not of bigrams
     final Map<String, Integer> totals = totalLinkagesOf(adjacencyList);
 
     adjacencyList.forEach((rootWord, setOfPairs) -> {
@@ -165,13 +168,13 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     final List<Integer> scoresOnly = new ArrayList<>();
     scores.forEach((word, score) -> scoresOnly.add(score));
     Collections.sort(scoresOnly);
-    int minimumScore =
-        scores.isEmpty() ? 0 : scoresOnly.get((int) Math.floor(scoresOnly.size() * 0.97));
+    int minimumScore = scores.isEmpty() ? 0
+        : scoresOnly.get((int) Math.floor(scoresOnly.size() * percentile));
 
-    final MinMaxPriorityQueue<WordWithScore> topics = MinMaxPriorityQueue
-        .maximumSize(5)
+    final MinMaxPriorityQueue<WordWithScore> t = MinMaxPriorityQueue
+        .maximumSize(topics)
         .create();
-    scores.forEach((word, score) -> topics.add(new WordWithScore(word, score)));
+    scores.forEach((word, score) -> t.add(new WordWithScore(word, score)));
 
     final Set<String> finalWords = new HashSet<>();
     scores.forEach((word, score) -> {
@@ -199,9 +202,4 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     private final String from;
     private final String to;
   }
-
-  private static final Set<String> ALLOWED_POS_TAGS = ImmutableSet.of(
-      //"NN", "NNS", "NNP", "NNPS", "VB", "VBS"
-      "NN", "VB"
-  );
 }

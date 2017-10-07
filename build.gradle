@@ -34,12 +34,12 @@ subprojects {
 
 project(":sbtk") {
   dependencies {
-    compile "org.apache.opennlp:opennlp-tools:$opennlpVersion"
     compile "com.google.guava:guava:$guavaVersion"
-    compile "org.projectlombok:lombok:$lombokVersion"
+    compile "io.dropwizard:dropwizard-core:$dropWizardVersion"
+    compile "org.apache.opennlp:opennlp-tools:$opennlpVersion"
     compile "org.deeplearning4j:deeplearning4j-core:$dl4jVersion"
-    compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
     compile "org.deeplearning4j:deeplearning4j-nlp:$dl4jVersion"
+    compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
 
     testCompile group: 'junit', name: 'junit', version: '4.12'
   }
@@ -59,6 +59,7 @@ project(":summarybox-service") {
   dependencies {
     compile project(":sbtk")
     compile "io.dropwizard:dropwizard-core:$dropWizardVersion"
+    compile "org.projectlombok:lombok:$lombokVersion"
     testCompile group: 'junit', name: 'junit', version: '4.12'
   }
 }
