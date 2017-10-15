@@ -42,13 +42,10 @@ public class BaseResourceFactory {
 
     private final WordScannerConfiguraton wordScannerConfig = config.getWordScanner();
     private final Set<String> TAGS = wordScannerConfig.getAllowedTags();
-    private final int similar = wordScannerConfig.getSimilarToTop();
-    private final double percentile = wordScannerConfig.getPercentile();
-    private final int topics = wordScannerConfig.getTopics();
     private final WordScanner scanner =
-        new WordScanner(detector, tagger, vec, STOP_WORDS, similar, percentile, topics, TAGS);
+        new WordScanner(detector, tagger, vec, STOP_WORDS, TAGS);
 
     @Getter(AccessLevel.PUBLIC)
-    private final RootResource rootResource = new RootResource(scanner);
+    private final RootResource rootResource = new RootResource(scanner, detector);
   }
 }

@@ -1,6 +1,3 @@
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -27,19 +23,17 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private final ThreadLocalTagger tagger;
   private final Word2Vec vec;
   private final Set<String> STOP_WORDS;
-  private int similar;
-  private double percentile;
-  private int topics;
   private final Set<String> ALLOWED_POS_TAGS;
 
-  private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
-      .expireAfterAccess(2, TimeUnit.MINUTES)
-      .build(new CacheLoader<WordPair, Integer>() {
-        @Override public Integer load(@Nonnull WordPair key) throws Exception {
-          double sim = vec.similarity(key.from, key.to);
-          return Math.toIntExact(Math.round(1000000 * sim));
-        }
-      });
+  //private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
+  //    .maximumSize(1)
+  //    .expireAfterAccess(2, TimeUnit.MINUTES)
+  //    .build(new CacheLoader<WordPair, Integer>() {
+  //      @Override public Integer load(@Nonnull WordPair key) throws Exception {
+  //        double sim = vec.similarity(key.from, key.to);
+  //        return Math.toIntExact(Math.round(1000000 * sim));
+  //      }
+  //    });
 
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
@@ -96,13 +90,15 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return normalized;
   }
 
-  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body)
+  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body, int n)
       throws ExecutionException {
     final MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
-        .maximumSize(similar)
+        .maximumSize(n)
         .create();
     for (String s : body) {
-      topN.add(new WordWithScore(word, similarityCache.get(new WordPair(word, s))));
+      double sim = vec.similarity(word, s);
+      int score = Math.toIntExact(Math.round(1000000 * sim));
+      topN.add(new WordWithScore(word, score));
     }
     return new HashSet<>(topN);
   }
@@ -141,15 +137,14 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   @SneakyThrows
-  Set<String> textRank(String corpus) {
-    // appx 20 ms
+  Set<String> textRank(String corpus, Integer similar, Double percentile, Integer topics) {
     final List<String> words = normalizedTokensOf(corpus);
     final Set<String> uniques = new HashSet<>(words);
     final Map<String, Set<WordWithScore>> adjacencyList =
         new HashMap<>(uniques.size());
 
     for (String unique : uniques) {
-      adjacencyList.put(unique, mostSimilarTo(unique, uniques));
+      adjacencyList.put(unique, mostSimilarTo(unique, uniques, similar));
     }
 
     // walk the graph
