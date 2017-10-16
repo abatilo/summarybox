@@ -1,12 +1,12 @@
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -24,16 +24,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private final Word2Vec vec;
   private final Set<String> STOP_WORDS;
   private final Set<String> ALLOWED_POS_TAGS;
-
-  //private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
-  //    .maximumSize(1)
-  //    .expireAfterAccess(2, TimeUnit.MINUTES)
-  //    .build(new CacheLoader<WordPair, Integer>() {
-  //      @Override public Integer load(@Nonnull WordPair key) throws Exception {
-  //        double sim = vec.similarity(key.from, key.to);
-  //        return Math.toIntExact(Math.round(1000000 * sim));
-  //      }
-  //    });
 
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
@@ -137,7 +127,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   @SneakyThrows
-  Set<String> textRank(String corpus, Integer similar, Double percentile, Integer topics) {
+  Set<String> textRank(String corpus, Integer similar, Integer keywordsPerChunk) {
     final List<String> words = normalizedTokensOf(corpus);
     final Set<String> uniques = new HashSet<>(words);
     final Map<String, Set<WordWithScore>> adjacencyList =
@@ -160,24 +150,14 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
               scores.getOrDefault(rootWord, uniques.size()) + frequencies.get(pair.getWord())));
     });
 
-    final List<Integer> scoresOnly = new ArrayList<>();
-    scores.forEach((word, score) -> scoresOnly.add(score));
-    Collections.sort(scoresOnly);
-    int minimumScore = scores.isEmpty() ? 0
-        : scoresOnly.get((int) Math.floor(scoresOnly.size() * percentile));
-
     final MinMaxPriorityQueue<WordWithScore> t = MinMaxPriorityQueue
-        .maximumSize(topics)
+        .maximumSize(keywordsPerChunk)
         .create();
     scores.forEach((word, score) -> t.add(new WordWithScore(word, score)));
 
-    final Set<String> finalWords = new HashSet<>();
-    scores.forEach((word, score) -> {
-      if (score >= minimumScore) {
-        finalWords.add(word);
-      }
-    });
-    return finalWords;
+    return t.stream()
+        .map(w -> w.word)
+        .collect(Collectors.toSet());
   }
 
   @Data

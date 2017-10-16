@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.Response;
@@ -47,8 +48,9 @@ public class RootResource {
     try {
       ObjectMapper mapper = new ObjectMapper();
       String resp = mapper.writeValueAsString(SummaryResponse.builder().keywords(
-          corpi.stream()
-              .map(c -> scanner.textRank(c, t.getSimilar(), t.getPercentile(), t.getTopics()))
+          Stream.of(t.corpus)
+              .peek(System.out::println)
+              .map(c -> scanner.textRank(c, t.getSimilar(), t.getKeywordsPerChunk()))
               .flatMap(Collection::stream)
               .collect(Collectors.toSet())
       ).build());
@@ -62,8 +64,7 @@ public class RootResource {
   private static class SummaryRequest {
     private String corpus = "";
     private Integer similar = 2;
-    private Double percentile = 0.8;
-    private Integer topics = 2;
+    private Integer keywordsPerChunk = 1;
   }
 
   @Data

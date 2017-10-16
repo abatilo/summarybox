@@ -3,9 +3,6 @@ posModel: en-pos-perceptron.bin
 w2vModel: news.bin
 stopWords: stopwords.txt
 wordScanner:
-  similarToTop: 3
-  percentile: 0.97
-  topics: 5
   allowedTags:
     - NN
     - VB
