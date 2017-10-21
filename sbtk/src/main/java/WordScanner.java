@@ -25,16 +25,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private final Set<String> STOP_WORDS;
   private final Set<String> ALLOWED_POS_TAGS;
 
-  //private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
-  //    .maximumSize(1)
-  //    .expireAfterAccess(2, TimeUnit.MINUTES)
-  //    .build(new CacheLoader<WordPair, Integer>() {
-  //      @Override public Integer load(@Nonnull WordPair key) throws Exception {
-  //        double sim = vec.similarity(key.from, key.to);
-  //        return Math.toIntExact(Math.round(1000000 * sim));
-  //      }
-  //    });
-
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
   private static String expandContractions(String inputString) {
@@ -51,29 +41,17 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   private boolean allowedWord(String word, String tag) {
-    if (word.length() <= 2) {
-      return false;
-    }
-
-    if (!ALLOWED_POS_TAGS.contains(tag)) {
-      return false;
-    }
-
-    if (STOP_WORDS.contains(word)) {
-      return false;
-    }
-
-    if (!vec.hasWord(word)) {
-      return false;
-    }
-    return true;
+    return word.length() > 2
+        && ALLOWED_POS_TAGS.contains(tag)
+        && !STOP_WORDS.contains(word)
+        && vec.hasWord(word);
   }
 
   private List<String> normalizedTokensOf(String corpus) {
     final String expandedCorpus = expandContractions(corpus);
-    final String removedPuncutation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
+    final String removedPunctuation = expandedCorpus.replaceAll("[^a-zA-Z. ]", "");
 
-    final String[] sentences = detector.get().sentDetect(removedPuncutation);
+    final String[] sentences = detector.get().sentDetect(removedPunctuation);
 
     final List<String> normalized = new ArrayList<>();
     for (String sentence : sentences) {
@@ -143,9 +121,11 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     final Map<String, Set<WordWithScore>> adjacencyList =
         new HashMap<>(uniques.size());
 
+    long start = System.currentTimeMillis();
     for (String unique : uniques) {
       adjacencyList.put(unique, mostSimilarTo(unique, uniques, similar));
     }
+    System.out.println(System.currentTimeMillis() - start);
 
     // walk the graph
     final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
