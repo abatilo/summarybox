@@ -1,8 +1,10 @@
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -81,10 +83,78 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return new HashSet<>(topN);
   }
 
-  private Map<String, Integer> wordFrequenciesOf(List<String> words) {
+  private static Map<String, Integer> wordFrequenciesOf(List<String> words) {
     final Map<String, Integer> frequencies = new HashMap<>(words.size());
     words.forEach(w -> frequencies.put(w, frequencies.getOrDefault(w, 0) + 1));
     return frequencies;
+  }
+
+  @VisibleForTesting
+  static Map<String, Double> unigramProbabilitiesOf(List<String> words) {
+    long start = System.currentTimeMillis();
+    Map<String, Integer> frequencies = wordFrequenciesOf(words);
+    Map<String, Double> probabilities = new HashMap<>(frequencies.size());
+    int totalNumberOfWords = frequencies.values().parallelStream().reduce(Integer::sum).orElse(0);
+    Iterator<Map.Entry<String, Integer>> iter = frequencies.entrySet().iterator();
+    while (iter.hasNext()) {
+      Map.Entry<String, Integer> entry = iter.next();
+      String k = entry.getKey();
+      Integer v = entry.getValue();
+      probabilities.put(k, (double) v / totalNumberOfWords);
+      iter.remove();
+    }
+    return probabilities;
+  }
+
+  private static WordPair sortedPair(String s1, String s2) {
+    List<String> pair = new ArrayList<>();
+    pair.add(s1);
+    pair.add(s2);
+    Collections.sort(pair);
+    return new WordPair(pair.get(0), pair.get(1));
+  }
+
+  @VisibleForTesting
+  static List<WordPair> skipgramsOf(List<String> words, int windowSize) {
+    List<WordPair> skipgrams = new ArrayList<>();
+    for (int i = 0; i < words.size(); ++i) {
+      String currentWord = words.get(i);
+      for (int j = 0; j < windowSize; ++j) {
+        int preOffset = i - windowSize + j;
+        int postOffset = i + windowSize - j;
+
+        if (preOffset >= 0) {
+          skipgrams.add(sortedPair(currentWord, words.get(preOffset)));
+        }
+
+        if (postOffset < words.size()) {
+          skipgrams.add(sortedPair(currentWord, words.get(postOffset)));
+        }
+      }
+    }
+    return skipgrams;
+  }
+
+  @VisibleForTesting
+  static Map<WordPair, Double> skipgramProbabilitiesOf(List<WordPair> skipgrams) {
+    long start = System.currentTimeMillis();
+    Map<WordPair, Double> frequencies = new HashMap<>();
+    skipgrams.forEach(pair -> frequencies.put(pair, frequencies.getOrDefault(pair, 0.0) + 1));
+    double totalNumberOfSkipgrams =
+        frequencies.values().parallelStream().reduce(Double::sum).orElse(0.0);
+    for (WordPair key : frequencies.keySet()) {
+      frequencies.put(key, frequencies.get(key) / totalNumberOfSkipgrams);
+    }
+    return frequencies;
+  }
+
+  static double pointwiseMutualInformationOf(List<String> corpus, String s1, String s2) {
+    Map<String, Double> unigramProbs = unigramProbabilitiesOf(corpus);
+    Map<WordPair, Double> skipgramProbs = skipgramProbabilitiesOf(skipgramsOf(corpus, 2));
+    return Math.log(
+        skipgramProbs.getOrDefault(sortedPair(s1, s2), 0.0)
+            / unigramProbs.getOrDefault(s1, 1.0)
+            / unigramProbs.getOrDefault(s2, 1.0));
   }
 
   private Map<String, Integer> totalLinkagesOf(Map<String, Set<WordWithScore>> words) {
@@ -95,14 +165,14 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
 
     final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>(bigrams.size());
     for (WordPair bigram : bigrams) {
-      if (bigramFreq.containsKey(bigram.from)) {
-        Map<String, Integer> firstLevel = bigramFreq.get(bigram.from);
-        firstLevel.put(bigram.to, firstLevel.getOrDefault(bigram.to, 0) + 1);
-        bigramFreq.put(bigram.from, firstLevel);
+      if (bigramFreq.containsKey(bigram.left)) {
+        Map<String, Integer> firstLevel = bigramFreq.get(bigram.left);
+        firstLevel.put(bigram.right, firstLevel.getOrDefault(bigram.right, 0) + 1);
+        bigramFreq.put(bigram.left, firstLevel);
       } else {
         Map<String, Integer> firstLevel = new HashMap<>();
-        firstLevel.put(bigram.to, 1);
-        bigramFreq.put(bigram.from, firstLevel);
+        firstLevel.put(bigram.right, 1);
+        bigramFreq.put(bigram.left, firstLevel);
       }
     }
 
@@ -125,7 +195,6 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     for (String unique : uniques) {
       adjacencyList.put(unique, mostSimilarTo(unique, uniques, similar));
     }
-    System.out.println(System.currentTimeMillis() - start);
 
     // walk the graph
     final Map<String, Integer> scores = new HashMap<>(adjacencyList.keySet().size());
@@ -173,8 +242,9 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
 
   @Data
   @RequiredArgsConstructor
-  private static final class WordPair {
-    private final String from;
-    private final String to;
+  @VisibleForTesting
+  static final class WordPair {
+    private final String left;
+    private final String right;
   }
 }
