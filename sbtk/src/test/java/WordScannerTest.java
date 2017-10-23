@@ -31,7 +31,7 @@ public class WordScannerTest {
         "Now they always say congratulations".split(" ")
     ));
 
-    List<WordScanner.WordPair> skipgrams = WordScanner.skipgramsOf(words, 1);
+    List<WordScanner.WordPair> skipgrams = WordScanner.skipgramFrequenciesOf(words, 1);
     assertEquals(8, skipgrams.size());
     assertTrue(skipgrams.contains(new WordScanner.WordPair("Now", "they")));
     assertTrue(skipgrams.contains(new WordScanner.WordPair("always", "they")));
@@ -53,7 +53,7 @@ public class WordScannerTest {
             + "It feel like my life ain't mine "
     ).split(" ")));
     Map<WordScanner.WordPair, Double> skipgramProbs = WordScanner.skipgramProbabilitiesOf(
-        WordScanner.skipgramsOf(words, 1));
+        WordScanner.skipgramFrequenciesOf(words, 1));
 
     assertEquals(0.0754, skipgramProbs.get(new WordScanner.WordPair("feel", "like")), 0.001);
     assertEquals(0.0377, skipgramProbs.get(new WordScanner.WordPair("I'm", "out")), 0.001);

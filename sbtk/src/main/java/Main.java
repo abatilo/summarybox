@@ -6,14 +6,19 @@ import java.util.Scanner;
 
 public class Main {
   public static void main(String[] args) throws IOException {
-    Scanner s = new Scanner(Resources.getResource("text8").openStream());
     List<String> corpus = new ArrayList<>();
-    long start = System.currentTimeMillis();
-    System.out.println("Streaming in corpus");
-    while (s.hasNext()) {
-      corpus.add(s.next());
+    {
+      Scanner s = new Scanner(Resources.getResource("text8").openStream());
+      long start = System.currentTimeMillis();
+      System.out.println("Streaming in corpus");
+      while (s.hasNext()) {
+        corpus.add(s.next());
+      }
+      System.out.println("That took: " + (System.currentTimeMillis() - start));
     }
-    System.out.println("That took: " + (System.currentTimeMillis() - start));
+    long start = System.currentTimeMillis();
+    System.out.println("Calculating PMI");
     System.out.println(WordScanner.pointwiseMutualInformationOf(corpus, "happy", "smile"));
+    System.out.println("That took: " + (System.currentTimeMillis() - start));
   }
 }
