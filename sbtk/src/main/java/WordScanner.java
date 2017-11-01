@@ -2,6 +2,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import com.google.common.collect.MinMaxPriorityQueue;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -9,7 +10,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nonnull;
@@ -73,8 +73,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return normalized;
   }
 
-  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body, int n)
-      throws ExecutionException {
+  private Set<WordWithScore> mostSimilarTo(String word, Set<String> body, int n) {
     final MinMaxPriorityQueue<WordWithScore> topN = MinMaxPriorityQueue
         .maximumSize(n)
         .create();
@@ -91,14 +90,16 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   }
 
   @VisibleForTesting
-  static Map<String, Double> unigramProbabilitiesOf(List<String> words) {
-    Map<String, Long> frequencies = wordFrequenciesOf(words);
+  static Map<String, Double> unigramProbabilitiesOf(List<String> corpus) {
+    Map<String, Long> frequencies = corpus.stream()
+            .map(sentence -> Arrays.stream(SimpleTokenizer.INSTANCE.tokenize(sentence)))
+            .flatMap(s -> s)
+            .collect(Collectors.groupingBy(s -> s, Collectors.counting()));
     long totalNumberOfWords =
         frequencies.values().stream().mapToLong(Long::longValue).sum();
     return frequencies.entrySet()
         .stream()
         .map(e -> Maps.immutableEntry(e.getKey(), (double) e.getValue() / totalNumberOfWords))
-        .parallel()
         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
@@ -106,8 +107,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return (s1.compareTo(s2) <= 0) ? new WordPair(s1, s2) : new WordPair(s2, s1);
   }
 
-  @VisibleForTesting
-  static Map<WordPair, Long> skipgramFrequenciesOf(List<String> words, int windowSize) {
+  private static List<WordPair> skipgramsOf(List<String> words, int windowSize) {
     return IntStream.range(0, words.size())
         .boxed()
         .map(i -> {
@@ -130,6 +130,17 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         })
         .flatMap(Collection::stream)
         .parallel()
+        .collect(Collectors.toList());
+  }
+
+  @VisibleForTesting
+  static Map<WordPair, Long> skipgramFrequenciesOf(List<String> words, int windowSize) {
+    return words.parallelStream()
+        .map(SimpleTokenizer.INSTANCE::tokenize)
+        .map(Arrays::asList)
+        .map(sentence -> skipgramsOf(sentence, windowSize))
+        .flatMap(Collection::stream)
+        .parallel()
         .collect(Collectors.groupingByConcurrent(wp -> wp, Collectors.counting()));
   }
 
@@ -144,13 +155,12 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
-  static double pointwiseMutualInformationOf(List<String> corpus, String s1, String s2) {
-    Map<String, Double> unigramProbs = unigramProbabilitiesOf(corpus);
-    Map<WordPair, Double> skipgramProbs = skipgramProbabilitiesOf(corpus, 1);
+  static double pointwiseMutualInformationOf(Map<String, Double> unigram,
+      Map<WordPair, Double> skipgram, String s1, String s2) {
     return Math.log(
-        skipgramProbs.getOrDefault(sortedPair(s1, s2), 0.0)
-            / unigramProbs.getOrDefault(s1, 1.0)
-            / unigramProbs.getOrDefault(s2, 1.0));
+        skipgram.getOrDefault(sortedPair(s1, s2), 0.0)
+            / unigram.getOrDefault(s1, 1.0)
+            / unigram.getOrDefault(s2, 1.0));
   }
 
   private Map<String, Long> totalLinkagesOf(Map<String, Set<WordWithScore>> words) {

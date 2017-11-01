@@ -41,9 +41,6 @@ project(":sbtk") {
     compile "org.deeplearning4j:deeplearning4j-nlp:$dl4jVersion"
     compile "org.nd4j:nd4j-native-platform:$dl4jVersion"
 
-    // https://mvnrepository.com/artifact/gov.nist.math/jama
-    compile group: 'gov.nist.math', name: 'jama', version: '1.0.3'
-
     testCompile group: 'junit', name: 'junit', version: '4.12'
   }
 }
