@@ -1,4 +1,5 @@
 import com.google.common.collect.MinMaxPriorityQueue;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -7,13 +8,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import javax.annotation.Nonnull;
+
 import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+
 import opennlp.tools.tokenize.SimpleTokenizer;
+
 import org.deeplearning4j.models.word2vec.Word2Vec;
 
 @Slf4j
@@ -90,19 +91,19 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private Map<String, Integer> totalLinkagesOf(Map<String, Set<WordWithScore>> words) {
     final List<WordPair> bigrams = new ArrayList<>(words.size());
     words.forEach((from, to) -> to.forEach(t -> {
-      bigrams.add(new WordPair(from, t.word));
+      bigrams.add(new WordPair(from, t.getWord()));
     }));
 
     final Map<String, Map<String, Integer>> bigramFreq = new HashMap<>(bigrams.size());
     for (WordPair bigram : bigrams) {
-      if (bigramFreq.containsKey(bigram.from)) {
-        Map<String, Integer> firstLevel = bigramFreq.get(bigram.from);
-        firstLevel.put(bigram.to, firstLevel.getOrDefault(bigram.to, 0) + 1);
-        bigramFreq.put(bigram.from, firstLevel);
+      if (bigramFreq.containsKey(bigram.getFrom())) {
+        Map<String, Integer> firstLevel = bigramFreq.get(bigram.getFrom());
+        firstLevel.put(bigram.getTo(), firstLevel.getOrDefault(bigram.getTo(), 0) + 1);
+        bigramFreq.put(bigram.getFrom(), firstLevel);
       } else {
         Map<String, Integer> firstLevel = new HashMap<>();
-        firstLevel.put(bigram.to, 1);
-        bigramFreq.put(bigram.from, firstLevel);
+        firstLevel.put(bigram.getTo(), 1);
+        bigramFreq.put(bigram.getFrom(), firstLevel);
       }
     }
 
@@ -158,23 +159,5 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
       }
     });
     return finalWords;
-  }
-
-  @Data
-  @RequiredArgsConstructor
-  private static class WordWithScore implements Comparable<WordWithScore> {
-    private final String word;
-    private final Integer score;
-
-    @Override public int compareTo(@Nonnull WordWithScore other) {
-      return -this.score.compareTo(other.score);
-    }
-  }
-
-  @Data
-  @RequiredArgsConstructor
-  private static final class WordPair {
-    private final String from;
-    private final String to;
   }
 }
