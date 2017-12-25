@@ -2,11 +2,17 @@
 
 A web service to perform keyword extraction from an unlabeled body of text
 
-summarybox works using the TextRank algorithm combined with word2vec vectors in order to calculate similarity between words. The concept of the approach here is that we try to find the words which are the most similar to all of the other words in the corpus. We model these relationships as a graph, then walk the graph in order to score words of relative importance.
+summarybox works using the TextRank algorithm combined with word2vec vectors in
+order to calculate similarity between words. The concept of the approach here
+is that we try to find the words which are the most similar to all of the other
+words in the corpus. We model these relationships as a graph, then walk the
+graph in order to score words of relative importance.
 
 ## Getting Started
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.
+These instructions will get you a copy of the project up and running on your
+local machine for development and testing purposes. See deployment for notes on
+how to deploy the project on a live system.
 
 ```
 git clone https://github.com/abatilo/summarybox.git
@@ -14,7 +20,8 @@ cd summarybox
 wget https://s3.amazonaws.com/dl4j-distribution/GoogleNews-vectors-negative300.bin.gz
 ```
 
-summarybox is a Dropwizard service which will use the `local.yaml` to load in configurations.
+summarybox is a Dropwizard service which will use the `local.yaml` to load in
+configurations.
 
 ```
 # The OpenNLP model for sentence detection
@@ -53,7 +60,7 @@ Fork the project and submit a PR and one of the maintainers will be in touch.
 
 * Aaron Batilo - Developer / maintainer - [abatilo](https://github.com/abatilo)
 
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
+See also the list of [contributors](https://github.com/abatilo/summarybox/contributors) who participated in this project.
 
 ## License
 
