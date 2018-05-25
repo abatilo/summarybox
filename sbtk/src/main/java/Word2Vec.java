@@ -9,6 +9,7 @@ import java.nio.FloatBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.Map;
+import java.util.Optional;
 
 public class Word2Vec {
 
@@ -73,6 +74,21 @@ public class Word2Vec {
       buffer.position(buffer.position() + 4 * layerSize);
     }
     return space.build();
+  }
+
+  public static double similarity(Map<String, double[]> model, String a, String b) {
+    double[] vectorA = model.get(a);
+    double[] vectorB = model.get(b);
+    double dotProduct = 0.0;
+    double normA = 0.0;
+    double normB = 0.0;
+    // https://stackoverflow.com/a/22913525
+    for (int i = 0; i < vectorA.length; i++) {
+        dotProduct += vectorA[i] * vectorB[i];
+        normA += Math.pow(vectorA[i], 2);
+        normB += Math.pow(vectorB[i], 2);
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
 }
