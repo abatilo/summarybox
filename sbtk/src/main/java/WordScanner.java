@@ -1,3 +1,6 @@
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.MinMaxPriorityQueue;
 
 import java.util.ArrayList;
@@ -8,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import javax.annotation.Nonnull;
 
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
@@ -25,6 +31,15 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
   private final Word2Vec vec;
   private final Set<String> STOP_WORDS;
   private final Set<String> ALLOWED_POS_TAGS;
+
+  private final LoadingCache<WordPair, Integer> similarityCache = CacheBuilder.newBuilder()
+      .expireAfterAccess(10, TimeUnit.MINUTES)
+      .build(new CacheLoader<WordPair, Integer>() {
+        @Override public Integer load(@Nonnull WordPair key) throws Exception {
+          double sim = vec.similarity(key.getFrom(), key.getTo());
+          return Math.toIntExact(Math.round(1000000 * sim));
+        }
+      });
 
   // Based on:
   // https://stackoverflow.com/questions/14062030/removing-contractions
@@ -75,9 +90,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
         .maximumSize(n)
         .create();
     for (String s : body) {
-      double sim = vec.similarity(word, s);
-      int score = Math.toIntExact(Math.round(1000000 * sim));
-      topN.add(new WordWithScore(word, score));
+      topN.add(new WordWithScore(word, similarityCache.get(new WordPair(word, s))));
     }
     return new HashSet<>(topN);
   }
