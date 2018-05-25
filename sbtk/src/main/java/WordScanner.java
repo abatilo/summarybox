@@ -21,14 +21,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import opennlp.tools.tokenize.SimpleTokenizer;
 
-import org.deeplearning4j.models.word2vec.Word2Vec;
-
 @Slf4j
 @AllArgsConstructor class WordScanner {
 
   private final ThreadLocalDetector detector;
   private final ThreadLocalTagger tagger;
-  private final Word2Vec vec;
+  private final Map<String, double[]> vec;
   private final Set<String> STOP_WORDS;
   private final Set<String> ALLOWED_POS_TAGS;
 
@@ -36,7 +34,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
       .expireAfterAccess(10, TimeUnit.MINUTES)
       .build(new CacheLoader<WordPair, Integer>() {
         @Override public Integer load(@Nonnull WordPair key) throws Exception {
-          double sim = vec.similarity(key.getFrom(), key.getTo());
+          double sim = Word2Vec.similarity(vec, key.getFrom(), key.getTo());
           return Math.toIntExact(Math.round(1000000 * sim));
         }
       });
@@ -60,7 +58,7 @@ import org.deeplearning4j.models.word2vec.Word2Vec;
     return word.length() > 2
         && ALLOWED_POS_TAGS.contains(tag)
         && !STOP_WORDS.contains(word)
-        && vec.hasWord(word);
+        && vec.containsKey(word);
   }
 
   private List<String> normalizedTokensOf(String corpus) {

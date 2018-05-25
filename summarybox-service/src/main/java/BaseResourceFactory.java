@@ -1,17 +1,22 @@
 import com.google.common.collect.Sets;
 import com.google.common.io.Resources;
+
 import io.dropwizard.setup.Environment;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
+import java.util.Map;
 import java.util.Set;
+
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+
 import opennlp.tools.postag.POSModel;
 import opennlp.tools.sentdetect.SentenceModel;
-import org.deeplearning4j.models.embeddings.loader.WordVectorSerializer;
-import org.deeplearning4j.models.word2vec.Word2Vec;
+
+import java.io.File;
 
 @AllArgsConstructor
 public class BaseResourceFactory {
@@ -24,7 +29,7 @@ public class BaseResourceFactory {
     }
 
     private final String w2vModel = config.getW2vModel();
-    private final Word2Vec vec = WordVectorSerializer.readWord2VecModel(w2vModel);
+    private final Map<String, double[]> model = Word2Vec.fromBin(new File(w2vModel));
 
     private final InputStream sentenceStream =
         Resources.getResource(config.getSentenceModel()).openStream();
@@ -43,7 +48,7 @@ public class BaseResourceFactory {
     private final WordScannerConfiguraton wordScannerConfig = config.getWordScanner();
     private final Set<String> TAGS = wordScannerConfig.getAllowedTags();
     private final WordScanner scanner =
-        new WordScanner(detector, tagger, vec, STOP_WORDS, TAGS);
+        new WordScanner(detector, tagger, model, STOP_WORDS, TAGS);
 
     @Getter(AccessLevel.PUBLIC)
     private final RootResource rootResource = new RootResource(scanner, detector);
