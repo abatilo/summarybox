@@ -1,7 +1,8 @@
 sentenceModel: en-sent.bin
 posModel: en-pos-perceptron.bin
-w2vModel: news.bin
+w2vModel: vectors-phrase.bin
 stopWords: stopwords.txt
-allowedTags:
-  - NN
-  - VB
+wordScanner:
+  allowedTags:
+    - NN
+    - VB
