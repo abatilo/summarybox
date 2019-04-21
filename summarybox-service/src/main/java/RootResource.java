@@ -1,9 +1,10 @@
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Set;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.Produces;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,8 @@ public class RootResource {
   private final ThreadLocalDetector detector;
 
   @POST
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
   public Response keywords(SummaryRequest t) {
     SummaryResponse resp = SummaryResponse.builder().keywords(
         scanner.textRank(t.getCorpus(), t.getSimilar(), t.getPercentile(), t.getTopics())
