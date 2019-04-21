@@ -17,15 +17,10 @@ public class RootResource {
 
   @POST
   public Response keywords(SummaryRequest t) {
-    try {
-      ObjectMapper mapper = new ObjectMapper();
-      String resp = mapper.writeValueAsString(SummaryResponse.builder().keywords(
-          scanner.textRank(t.getCorpus(), t.getSimilar(), t.getPercentile(), t.getTopics())
-      ).build());
-      return Response.ok(resp).build();
-    } catch (JsonProcessingException e) {
-      return Response.serverError().build();
-    }
+    SummaryResponse resp = SummaryResponse.builder().keywords(
+        scanner.textRank(t.getCorpus(), t.getSimilar(), t.getPercentile(), t.getTopics())
+        ).build();
+    return Response.ok(resp).build();
   }
 
   @Data
