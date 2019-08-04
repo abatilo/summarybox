@@ -1,0 +1,102 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: spinnaker
+  labels:
+    app: summarybox
+  name: summarybox
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: summarybox
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      name: summarybox
+      labels:
+        app: summarybox
+    spec:
+      containers:
+        - image: registry.public.abatilo.cloud/summarybox
+          name: summarybox
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: 200m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 1Gi
+      imagePullSecrets:
+        - name: abatilo-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: spinnaker
+  name: summarybox
+spec:
+  type: ClusterIP
+  selector:
+    app: summarybox
+  ports:
+  - name: summarybox
+    port: 80
+    targetPort: 8080
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  namespace: spinnaker
+  name: summarybox
+  labels:
+    traefikSelector: abatiloservices
+    app: summarybox
+  annotations:
+    traefik.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+  - host: api.aaronbatilo.dev
+    http:
+      paths:
+      - path: /summarybox
+        backend:
+          serviceName: summarybox
+          servicePort: summarybox
+---
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: summarybox
+  namespace: spinnaker
+spec:
+  maxReplicas: 10
+  minReplicas: 2
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: summarybox
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        targetAverageUtilization: 20
+    # - type: Object
+    #   object:
+    #     metric:
+    #       name: requests-per-second
+    #     describedObject:
+    #       apiVersion: extensions/v1beta1
+    #       kind: Ingress
+    #       name: summarybox
+    #     target:
+    #       kind: Value
+    #       value: 15
