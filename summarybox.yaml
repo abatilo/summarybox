@@ -23,7 +23,7 @@ spec:
         app: summarybox
     spec:
       containers:
-        - image: registry.public.abatilo.cloud/summarybox
+        - image: registry.aaronbatilo.dev/summarybox
           name: summarybox
           ports:
             - containerPort: 8080
